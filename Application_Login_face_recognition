@@ -1,0 +1,697 @@
+import tkinter as tk
+from tkinter import ttk, simpledialog, messagebox,filedialog
+import json
+import string
+import random
+import webbrowser
+import random
+import pyperclip
+import speech_recognition as sr
+import cv2
+import numpy as np
+import os
+import shutil
+from ttkthemes import ThemedTk
+import ctypes  
+from ctypes import wintypes
+import pyautogui 
+from tkinter import *
+import time
+
+# Constants
+IMAGE_SIZE = (128, 128)
+IMAGE_COUNT = 4
+THRESHOLD = 0.5
+DATA_DIR = "user_data"
+USER_DATA_FILE = "user_data.npy"
+
+
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR)
+
+
+user_credentials = {}
+user_information = {}
+current_user = None
+
+recognizer = cv2.face.LBPHFaceRecognizer_create()
+
+def capture_images(user_id):
+    user_dir = os.path.join(DATA_DIR, str(user_id))
+    os.makedirs(user_dir)
+
+    
+    frames = []
+    for i in range(IMAGE_COUNT):
+        
+        cap = cv2.VideoCapture(0)
+
+       
+        ret, frame = cap.read()
+
+       
+        frame = cv2.resize(frame, IMAGE_SIZE)
+
+        
+        image_path = os.path.join(user_dir, f"{i}.jpg")
+        cv2.imwrite(image_path, frame)
+
+        
+        cap.release()
+
+        frames.append(frame)
+        print(f"Image {i+1} captured.")
+
+    print("Image capture completed.")
+    return np.array(frames)
+
+def compare_images(user_id, input_image):
+    user_dir = os.path.join(DATA_DIR, str(user_id))
+    user_images = []
+    for i in range(IMAGE_COUNT):
+        image_path = os.path.join(user_dir, f"{i}.jpg")
+        image = cv2.imread(image_path)
+        image = cv2.resize(image, IMAGE_SIZE)
+        user_images.append(image)
+
+    
+    input_image = cv2.resize(input_image, IMAGE_SIZE)
+
+    
+    similarities = []
+    for user_image in user_images:
+        diff = cv2.absdiff(user_image, input_image)
+        similarity = 1 - (np.mean(diff) / 255)
+        similarities.append(similarity)
+
+   
+    average_similarity = np.mean(similarities)
+
+    return average_similarity
+
+def recognize_faces_login():
+    cap = cv2.VideoCapture(0)
+
+    
+    duration = 5  # Specify the duration in seconds
+    start_time = time.time()
+    frames = []
+    while time.time() - start_time < duration:
+        ret, frame = cap.read()
+        frames.append(frame)
+
+    
+    cap.release()
+
+    
+    if os.path.exists(USER_DATA_FILE):
+        user_data = np.load(USER_DATA_FILE, allow_pickle=True)
+        max_similarity = 0
+        max_user_id = None
+
+        for user_id, user_image in enumerate(user_data):
+            for frame in frames:
+                similarity = compare_images(user_id, frame)
+                if similarity > max_similarity:
+                    max_similarity = similarity
+                    max_user_id = user_id
+
+        if max_similarity >= THRESHOLD:
+            show_interface()
+        else:
+            print("User not recognized.")
+            return None
+    else:
+        print("No user data found.")
+        return None
+
+def capture_and_register_face():
+    cap = cv2.VideoCapture(0)
+
+    
+    ret, frame = cap.read()
+
+    
+    cap.release()
+
+    user_id = simpledialog.askstring("User ID", "Enter your ID:")
+    if user_id is None:
+        print("Registration canceled.")
+        return
+
+    
+    user_dir = os.path.join(DATA_DIR, str(user_id))
+    if os.path.exists(user_dir):
+        print("User ID already exists.")
+        return
+
+    
+    user_images = capture_images(user_id)
+
+    # Save user images
+    np.save(os.path.join(DATA_DIR, f"{user_id}.npy"), user_images)
+
+    print("Face registered successfully.")
+
+
+
+def open_album():
+    global current_user
+
+    if current_user and current_user in user_information:
+        user_info = user_information[current_user]
+        album_path = user_info.get('album_path')
+
+        if album_path:
+            webbrowser.open(album_path)
+        else:
+            messagebox.showinfo("Album", "No album found.")
+    else:
+        messagebox.showinfo("Album", "User information not found.")
+
+def upload_file():
+    global current_user
+
+    if current_user and current_user in user_information:
+        file_path = filedialog.askopenfilename(filetypes=[("Image files", "*.jpg;*.jpeg;*.png"), ("Video files", "*.mp4")])
+        if file_path:
+            filename = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+            _, ext = os.path.splitext(file_path)
+            destination = os.path.join("uploads", f"{filename}{ext}")
+            shutil.move(file_path, destination)
+
+            user_info = user_information[current_user]
+            album_path = user_info.get('album_path')
+            if not album_path:
+                # Create a directory for the user's album
+                album_path = f"album_{current_user}"
+                os.makedirs(album_path)
+                user_info['album_path'] = album_path
+
+            shutil.move(destination, album_path)
+
+            messagebox.showinfo("Upload", "File uploaded successfully.")
+    else:
+        messagebox.showinfo("Upload", "User information not found.")
+
+
+def logout():
+    global current_user
+    current_user = None
+    login_frame.pack()
+    interface_frame.pack_forget()
+
+def create_account():
+    global current_user
+    method = messagebox.askquestion("Registration Method", "Do you want your registration method to be Face Recognition?")
+    if method == 'yes':
+        capture_and_register_face()
+        username = simpledialog.askstring("Create New User", "Enter a username:")
+        password = simpledialog.askstring("Create New User", "Enter a password:")
+        name = simpledialog.askstring("Create New User", "Enter your name:")
+        last_name = simpledialog.askstring("Create New User", "Enter your last name:")
+        id = simpledialog.askstring("Create New User", "Enter your ID:")
+        biography = simpledialog.askstring("Create New User", "Enter a biography:")
+
+    else:
+        username = simpledialog.askstring("Create New User", "Enter a username:")
+        password = simpledialog.askstring("Create New User", "Enter a password:")
+        name = simpledialog.askstring("Create New User", "Enter your name:")
+        last_name = simpledialog.askstring("Create New User", "Enter your last name:")
+        id = simpledialog.askstring("Create New User", "Enter your ID:")
+        biography = simpledialog.askstring("Create New User", "Enter a biography:")
+
+    # Add the code for country and sub-options selection
+    country = simpledialog.askstring("Create New User", "Choose a country (Greece/Spain):")
+    
+    if country:
+        if country == "Greece":
+            sub_options = ["Pyrgos", "Patra", "Sparti", "Athens", "Thessaloniki", "Volos"]
+        elif country == "Spain":
+            sub_options = ["Granada", "Valencia", "Barcelona", "Madrid", "Malaga", "Sevilla"]
+        else:
+            messagebox.showerror("Create New User", "Invalid country selection")
+            return
+        
+        city = simpledialog.askstring("Create New User", f"Choose a city ({', '.join(sub_options)}):")
+        
+        if city not in sub_options:
+            messagebox.showerror("Create New User", "Invalid city selection")
+            return
+    else:
+        messagebox.showerror("Create New User", "Country selection is required")
+        
+    email = simpledialog.askstring("Create New User", "Choose an email provider (Gmail/Yahoo/Webmail/Outlook):")
+
+    if email not in ["Gmail", "Yahoo", "Webmail", "Outlook"]:
+        messagebox.showerror("Create New User", "Invalid email provider selection")
+        return
+    
+
+    if username and password:
+        if username not in user_credentials:
+            user_credentials[username] = password
+            user_information[username] = {
+                "name": name,
+                "last_name": last_name,
+                "username": username,
+                "id": id,
+                "biography": biography,
+                "country": country,
+                "city": city,
+                "email_option": email
+            }
+            current_user = username
+            show_interface()
+        else:
+            messagebox.showerror("Create New User", "Username already exists")
+    else:
+        messagebox.showerror("Create New User", "Username and password are required")
+
+
+
+def load_user_data():
+    global user_credentials, user_information
+
+    try:
+        with open("user_data.json", "r") as file:
+            data = json.load(file)
+            user_credentials = data["credentials"]
+            user_information = data["information"]
+    except FileNotFoundError:
+        user_credentials = {}
+        user_information = {}
+
+def save_user_data():
+    data = {
+        "credentials": user_credentials,
+        "information": user_information
+    }
+
+    with open("user_data.json", "w") as file:
+        json.dump(data, file)
+
+def login():
+    global current_user
+
+    username = username_entry.get()
+    password = password_entry.get()
+
+    if username and password:
+        if username in user_credentials and user_credentials[username] == password:
+            current_user = username
+            show_interface()
+        else:
+            messagebox.showerror("Login", "Invalid username or password")
+    else:
+        messagebox.showerror("Login", "Username and password are required")
+
+def open_option(option):
+    if option == "Email":
+        if current_user and current_user in user_information:
+            email_option = user_information[current_user].get('email_option')
+
+            if email_option:
+                if email_option == "Gmail":
+                    webbrowser.open("https://gmail.com")
+                elif email_option == "Yahoo":
+                    webbrowser.open("https://yahoo.com")
+                elif email_option == "Webmail":
+                    webbrowser.open("https://webmailest.ugr.es/?_task=mail&_mbox=INBOX")
+                elif email_option == "Outlook":
+                    webbrowser.open("https://outlook.live.com")
+
+            else:
+                messagebox.showerror("Email", "No email option selected.")
+        else:
+            messagebox.showerror("Email", "User information not found.")
+
+    elif option == "Weather":
+        option2_window = tk.Toplevel(root)
+        option2_window.title("Weather")
+
+        option2_label = ttk.Label(option2_window, text="Choose an option:")
+        option2_label.pack(padx=10, pady=10)
+
+      
+        user_city = None
+        if current_user in user_information:
+            user_city = user_information[current_user].get("city")
+
+        option2_suboption1_button = ttk.Button(option2_window, text="Greece", command=lambda: open_suboption("Greece"))
+        option2_suboption1_button.pack(padx=10, pady=5)
+
+        option2_suboption2_button = ttk.Button(option2_window, text="Spain", command=lambda: open_suboption("Spain"))
+        option2_suboption2_button.pack(padx=10, pady=5)
+
+        
+        if user_city:
+            option2_user_city_button = ttk.Button(option2_window, text=user_city, command=lambda: show_weather(user_city))
+            option2_user_city_button.pack(padx=10, pady=5)
+
+
+    elif option == "option3":
+        option3_window = tk.Toplevel(root)
+        option3_window.title("Option 3")
+
+        option3_label = ttk.Label(option3_window, text="Choose an option:")
+        option3_label.pack(padx=10, pady=10)
+
+        option3_suboption1_button = ttk.Button(option3_window, text="Youtube", command=lambda: open_suboption3_link("https://www.youtube.com/"))
+        option3_suboption1_button.pack(padx=10, pady=5)
+
+        option3_suboption2_button = ttk.Button(option3_window, text="Netflix", command=lambda: open_suboption3_link("https://www.netflix.com/browse"))
+        option3_suboption2_button.pack(padx=10, pady=5)
+ 
+
+def open_suboption3_link(link):
+    if link:
+        webbrowser.open(link)
+    else:
+        messagebox.showinfo("Entertainment", "No link provided.")
+
+def show_weather(city):
+    if city:
+        # Implement the code to display weather information for the selected city
+        messagebox.showinfo("Weather", f"Weather information for {city}")
+    else:
+        messagebox.showinfo("Weather", "No city selected")
+
+def open_suboption(suboption):
+    global current_user
+
+    if suboption == "Greece":
+        suboption1_window = tk.Toplevel(root)
+        suboption1_window.title("Greece")
+
+        suboption1_label = ttk.Label(suboption1_window, text="Choose a city:")
+        suboption1_label.pack(padx=10, pady=10)
+
+        city_options = ["Pyrgos", "Patra", "Sparti", "Athens", "Thessaloniki", "Volos"]
+        selected_city = tk.StringVar(suboption1_window)
+
+        city_dropdown = ttk.Combobox(suboption1_window, textvariable=selected_city, values=city_options)
+        city_dropdown.pack(padx=10, pady=5)
+
+        confirm_button = ttk.Button(suboption1_window, text="Confirm", command=lambda: save_city_selection(selected_city.get()))
+        confirm_button.pack(padx=10, pady=5)
+
+    elif suboption == "Spain":
+        suboption2_window = tk.Toplevel(root)
+        suboption2_window.title("Spain")
+
+        suboption2_label = ttk.Label(suboption2_window, text="Choose a city:")
+        suboption2_label.pack(padx=10, pady=10)
+
+        city_options = ["Granada", "Valencia", "Barcelona", "Madrid", "Malaga", "Sevilla"]
+        selected_city = tk.StringVar(suboption2_window)
+
+        city_dropdown = ttk.Combobox(suboption2_window, textvariable=selected_city, values=city_options)
+        city_dropdown.pack(padx=10, pady=5)
+
+        confirm_button = ttk.Button(suboption2_window, text="Confirm", command=lambda: save_city_selection(selected_city.get()))
+        confirm_button.pack(padx=10, pady=5)
+
+
+def save_city_selection(city):
+    global current_user, user_information
+
+    if current_user and current_user in user_information:
+        user_information[current_user]["City"] = city
+        messagebox.showinfo("City Selection", f"City '{city}' selected!")
+
+        
+        if city == "Pyrgos":
+            webbrowser.open("https://www.accuweather.com/en/gr/pyrgos/2284458/weather-forecast/2284458")
+        elif city == "Patra":
+            webbrowser.open("https://www.bbc.com/weather/255683")
+        elif city == "Sparti":
+            webbrowser.open("https://weather.com/weather/tenday/l/Sparti+Peloponnese+Greece?canonicalCityId=bd4ff2f1b70db901960aa95e04806a435be0aa7052973b6fa58c38e403a7e87a")
+        elif city == "Athens":
+            webbrowser.open("https://www.bbc.com/weather/264371")
+        elif city == "Thessaloniki":
+            webbrowser.open("https://www.bbc.com/weather/734077")
+        elif city == "Volos":
+            webbrowser.open("https://www.bbc.com/weather/251833")
+        elif city == "Granada":
+            webbrowser.open("https://www.bbc.com/weather/2517117")
+        elif city == "Valencia":
+            webbrowser.open("https://www.bbc.com/weather/2509954")
+        elif city == "Barcelona":
+            webbrowser.open("https://www.bbc.com/weather/3128760")
+        elif city == "Madrid":
+            webbrowser.open("https://www.bbc.com/weather/3117735")
+        elif city == "Malaga":
+            webbrowser.open("https://www.bbc.com/weather/2514256")
+        elif city == "Sevilla":
+            webbrowser.open("https://www.bbc.com/weather/2510911")
+
+
+def open_option4():
+    length = int(simpledialog.askstring("Password Length", "Enter the desired length of the password:"))
+    complexity = simpledialog.askstring("Password Complexity", "Specify the complexity level of the password.\nInclude any of the following (comma-separated):\n- 'upper' for uppercase letters\n- 'lower' for lowercase letters\n- 'numbers' for numbers\n- 'special' for special characters")
+    password = generate_password(length, complexity.split(","))
+
+    if password:
+        messagebox.showinfo("Generated Password", f"Generated Password: {password}")
+        choice = messagebox.askyesno("Save Password", "Do you want to save the generated password to a file?")
+        if choice:
+            save_password(password)
+
+            clipboard_choice = messagebox.askyesno("Copy to Clipboard", "Do you want to copy the password to the clipboard?")
+            if clipboard_choice:
+                pyperclip.copy(password)
+                messagebox.showinfo("Password Copied", "The password has been copied to the clipboard.")
+
+
+def open_profile():
+    global current_user
+
+    if current_user and current_user in user_information:
+        info = user_information[current_user]
+        messagebox.showinfo("Profile", f"Name: {info['name']}\n"
+                                        f"Last Name: {info['last_name']}\n"
+                                        f"Username: {info['username']}\n"
+                                        f"ID: {info['id']}\n"
+                                        f"Biography: {info['biography']}")
+
+        
+
+def voice_recognition():
+    with sr.Microphone() as source:
+        print("Listening...")
+        audio = recognizer.listen(source, timeout=3)  # Adjust the timeout to 5 seconds
+
+    try:
+        print("Recognizing...")
+        text = recognizer.recognize_google(audio)
+        print("Recognized text:", text)
+        process_voice_command(text)
+
+    except sr.UnknownValueError:
+        print("Could not understand audio")
+
+    except sr.RequestError as e:
+        print("Recognition request failed:", str(e))
+        
+def process_voice_command(command):
+    if current_user:
+        command = command.lower()
+
+        if "weather" in command:
+            open_option("weather")
+        elif "email" in command:
+            open_option("email")
+        elif "entertainment" in command:
+            open_option("entertainment")
+        elif "profile" in command:
+            open_profile()
+        elif "exit" in command or "quit" in command:
+            close_window()
+        elif "mute" in command:
+            pyautogui.press("volumemute")
+            print("PC volume muted")
+        elif "up volume" in command:
+            pyautogui.press("volumeup")
+            print("PC volume increased")
+        elif "down volume" in command:
+            pyautogui.press("volumedown")
+            print("PC volume decreased")
+        else:
+            print("Unknown command")
+
+def close_window():
+    save_user_data()
+    root.destroy()
+
+        
+
+def show_interface():
+    global current_user
+    user_info = user_information.get(current_user)
+
+    if user_info:
+        album_path = user_info.get('album_path')
+        if not album_path:
+            album_path = f"album_{current_user}"
+            os.makedirs(album_path)
+            user_info['album_path'] = album_path
+
+        interface_frame.pack()
+        login_frame.pack_forget()
+    else:
+        messagebox.showerror("Error", "User information not found.")
+
+def generate_password(length, complexity):
+    characters = ""
+
+    if "upper" in complexity:
+        characters += string.ascii_uppercase
+    if "lower" in complexity:
+        characters += string.ascii_lowercase
+    if "numbers" in complexity:
+        characters += string.digits
+    if "special" in complexity:
+        characters += string.punctuation
+
+    if len(characters) == 0:
+        return ""
+
+    password = "".join(random.choice(characters) for _ in range(length))
+    return password
+
+def save_password(password):
+    pass
+
+def setup_gui():
+    global root, login_frame, username_entry, password_entry, interface_frame
+
+    root = tk.Tk()
+    root.title("C.E.L")
+    root.geometry("400x400")
+    root.configure(bg="gray12") 
+
+    style = ttk.Style(root)
+    style.configure("TButton", font=("Helvetica", 11))
+    style.configure("TLabel", font=("Helvetica", 11))
+    style.configure("TButton", background="lightgreen")
+    style.configure("CustomFrame.TFrame", background="gray12") 
+
+    load_user_data()
+
+    login_frame = ttk.Frame(root, padding="20", style="CustomFrame.TFrame")
+    login_frame.pack(expand=True)
+    
+    
+    frame_style = ttk.Style()
+    frame_style.configure("CustomFrame.TFrame", background="gray12")  # Set the background color of the frame
+
+  
+    button_style = ttk.Style()
+    button_style.configure("CustomButton.TButton", background="lightgreen")  # Set the background color of the buttons
+
+
+    
+   
+    username_label = ttk.Label(login_frame, text="Username:")
+    username_label.grid(row=0, column=0, padx=10, pady=10)
+    username_entry = ttk.Entry(login_frame)
+    username_entry.grid(row=0, column=1, padx=10, pady=10)
+
+    password_label = ttk.Label(login_frame, text="Password:")
+    password_label.grid(row=1, column=0, padx=10, pady=10)
+    password_entry = ttk.Entry(login_frame, show="*")
+    password_entry.grid(row=1, column=1, padx=10, pady=10)
+
+    
+    login_button = ttk.Button(login_frame, text="Login", command=login, style="CustomButton.TButton")
+    login_button.grid(row=2, column=0, columnspan=2, padx=10, pady=10)
+
+   
+    new_user_button = ttk.Button(login_frame, text="Create New User", command=create_account, style="CustomButton.TButton")
+    new_user_button.grid(row=3, column=0, columnspan=2, padx=10, pady=10)
+
+    login_frame.pack()
+
+   
+    interface_frame = ttk.Frame(root, padding="20", style="CustomInterfaceFrame.TFrame")
+    interface_frame.pack(expand=True)
+
+     
+    interface_frame_style = ttk.Style()
+    interface_frame_style.configure("CustomInterfaceFrame.TFrame", background="gray12")  # Set the background color of the interface frame
+
+
+    option1_button = ttk.Button(interface_frame, text="Email", command=lambda: open_option("Email"))
+    option1_button.grid(row=0, column=0, padx=10, pady=10)
+
+    option2_button = ttk.Button(interface_frame, text="Weather", command=lambda: open_option("Weather"))
+    option2_button.grid(row=0, column=1, padx=10, pady=10)
+
+    option3_button = ttk.Button(interface_frame, text="Entertainment", command=lambda: open_option("option3"))
+    option3_button.grid(row=0, column=2, padx=10, pady=10)
+
+    option4_button = ttk.Button(interface_frame, text="Generate Password", command=open_option4)
+    option4_button.grid(row=1, column=0, columnspan=3, padx=10, pady=10)
+
+    option5_button = ttk.Button(interface_frame, text="Profile", command=open_profile)
+    option5_button.grid(row=2, column=0, columnspan=3, padx=10, pady=10)
+
+    option6_button = ttk.Button(interface_frame, text="Voice Recognition", command=voice_recognition)
+    option6_button.grid(row=3, column=0, columnspan=3, padx=10, pady=10)
+
+    logout_button = ttk.Button(interface_frame, text="Logout", command=logout)
+    logout_button.grid(row=4, column=0, columnspan=3, padx=10, pady=10)
+    
+    upload_button = ttk.Button(interface_frame, text="Upload", command=upload_file)
+    upload_button.grid(row=6, column=0, columnspan=3, padx=10, pady=10)
+
+    album_button = ttk.Button(interface_frame, text="Album", command=open_album)
+    album_button.grid(row=5, column=0, columnspan=3, padx=10, pady=10)
+
+    interface_frame.pack_forget()
+
+    root.protocol("WM_DELETE_WINDOW", close_window)
+    root.mainloop()
+
+
+def open_new_window():
+    new_window = tk.Tk()
+    new_window.title("Log in Options-C.E.L")
+    new_window.geometry("400x200")
+    new_window.configure(bg="gray12")
+
+    style = ttk.Style(new_window)
+    style.configure("TButton", font=("Helvetica", 11))
+    style.configure("TLabel", font=("Helvetica", 11))
+    style.configure("TButton", background="lightgreen")
+    style.configure("CustomFrame.TFrame", background="gray12")
+
+    def select_option(option):
+        if option == 1:
+            setup_gui()
+        elif option == 2:
+            recognize_faces_login()
+        new_window.destroy()
+
+    option_frame = ttk.Frame(new_window, style="CustomFrame.TFrame")
+    option_frame.pack(pady=20)
+
+    option_label = ttk.Label(option_frame, text="How you want to Connect:", style="TLabel")
+    option_label.pack()
+
+    button_frame = ttk.Frame(new_window, style="CustomFrame.TFrame")
+    button_frame.pack(pady=10)
+
+    option1_button = ttk.Button(button_frame, text="Username/Code", command=lambda: select_option(1), style="CustomButton.TButton")
+    option1_button.grid(row=0, column=1, padx=10)
+
+    option2_button = ttk.Button(button_frame, text="Face ID", command=lambda: select_option(2), style="CustomButton.TButton")
+    option2_button.grid(row=1, column=1, padx=10)
+
+    
+
+    new_window.mainloop()
+
+
+open_new_window()
